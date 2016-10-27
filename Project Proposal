@@ -1,0 +1,25 @@
+Introduction 
+
+Social media has become an important aspect in the current society, as many individuals tend to post about their daily lives and their reactions about events that occur around the world. One of the most popular site is Twitter, a microblogging service in which people use less than 140 characters to express about anything they like to others. These messages are most commonly known as “Tweets.” This is currently the new approach of retrieving a global understanding of how societies feel about occurring events in the different fields, such as sports, politics, films, and etc. 
+Sentiment analysis is one method that is being used to classify tweets regarding different topics. The posts can be classified as either positive or negative according to the emotions that is being projected through each text.  With an algorithm that automatically categorizes the tweets, reviewers can use it to get a better knowledge of what the perspectives are on a particular subject or it can be a new feature that Twitter includes for users to get a better understanding of how the tweeter is feeling. This experiment can be expanded in order to be used for classifying movie reviews in order to get a statistical value, which is one of the many concepts where sentiment analysis can be incorporated. 
+We are interesting in analyzing sentiments from Twitter and determining how positive or negative the views are on any subject that we can search for using hashtags.
+
+Data Collection
+
+Different twitter sentiment analysis datasets are currently available online. We intend to use the sentiment140 free dataset. Its data format consists of six fields: first, a polarity index (0 being negative, 2 neutral and 4 positive). Among the other fields are an id, the date and the name of the user. However, the sentiment140 dataset was not collected manually, and instead relied on a ruleset to annotate tweets.
+Another possibility is the Sanders Analytics dataset, which was created manually, and contains 5513 annotated tweets. The classifier goes through every tweet and classifies them as either positive, neutral, negative or irrelevant, while searching for four distinct topics being Apple, Google, Microsoft and Twitter. By going through the tweets and determining what makes each set positive, neutral or negative, it will be possible to predict for future tweets in which category they would fall.
+
+Experiment
+The selected dataset will be split into two, in which one will be for training purposes, while the remaining will be for testing the accuracy of the algorithms. We have decided on using two types of classifiers, which are the “Naive Bayes Classifier,” the “Paragraph Vector”.
+The Naive Bayes Classifier will check the probability of each new data entry to be of which category depending on how close the message is to the prior messages found in that category and on how many messages have been classified in that category beforehand. We can then assume which category that message probably belongs to. This will be our baseline method to see how accurate the next method is.
+The Paragraph Vector is an unsupervised learning method in which the ordering of the words will be accounted for. Word vectors are created with the purpose of predicting the next word in the sentence, which will help capture semantics in a message. After getting word vectors, we can feed these into classifying algorithms to determine which category to attribute to each word vector.
+From here and having analyzed the dataset, we will have trained a system that should be able to determine if a microblog is positive, negative or neutral. With this system, we will be able to use some data mining on Twitter, and find the public opinion on any subject using a hashtag and inferring the positivity on every tweet, thus analyzing how polarizing a subject can be.
+
+References 
+
+[1]	Y.Yuan and Y.Zhou. Twitter Sentiment Analysis with Recursive Neural Networks. http://cs224d.stanford.edu/reports/YuanYe.pdf.
+
+[2]	J.Hong and M.Fang. Sentiment Analysis with Deeply Learned Distributed Representations of Variable Length Texts. http://cs224d.stanford.edu/reports/HongJames.pdf.
+
+[3]	A.Go, L.Huang and R.Bhayani. Twitter Sentiment Analysis. http://www-nlp.stanford.edu/courses/cs224n/2009/fp/3.pdf.
+
