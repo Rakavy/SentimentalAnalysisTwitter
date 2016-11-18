@@ -2,10 +2,10 @@ import pandas as pnd
 import numpy as np
 import nltk
 
-def processString(str):
-    return str.translate(None, '@')
+def processString(stro):
+    return stro.translate(None, '@#')
 
-preprocess=np.vectorize(str)
+preprocess=np.vectorize(processString)
 
 def readCSV(filePath):
 
@@ -14,6 +14,10 @@ def readCSV(filePath):
     tSentiments=csvTwitter[:,0]
 
     textData=preprocess(csvTwitter[:,5])
+
+    #textData=csvTwitter[:,5].str.translate(None, '@a')
+
+    print(textData)
 
     return (tSentiments, textData)
 
