@@ -3,13 +3,19 @@ import numpy as np
 import nltk
 #nltk.download('punkt')
 
+
+def processString(stro):
+    return stro.translate(None, '@#')
+
+preprocess=np.vectorize(processString)
+
 def readCSV(filePath):
 
     csvTwitter=pnd.read_csv(filePath,header=None).values
 
     tSentiments=csvTwitter[:,0]
 
-    textData=csvTwitter[:,5]
+    textData=preprocess(csvTwitter[:,5])
 
     return (tSentiments, textData)
 
