@@ -5,7 +5,7 @@ import nltk
 
 def readCSV(filePath):
 
-    csvTwitter=pnd.read_csv(filepath,header=None).values
+    csvTwitter=pnd.read_csv(filePath,header=None).values
 
     tSentiments=csvTwitter[:,0]
 
