@@ -1,7 +1,7 @@
 import pandas as pnd
 import numpy as np
 import nltk
-#nltk.download('punkt')
+nltk.download('punkt')
 
 
 def processString(stro):
@@ -23,7 +23,10 @@ def readCSV(filePath):
 def tokenzieSentence(tweets):
     tokenizedPhrase = []
     for phrase in tweets:
-        tokenizedPhrase.append(nltk.word_tokenize(phrase))
+        tokenizedPhrase.append([word[0] for word in nltk.pos_tag(nltk.word_tokenize(phrase)) if word[1] not in ['CC','IN']])
+
+
+
 
     return tokenizedPhrase
 
@@ -31,5 +34,6 @@ def tokenzieSentence(tweets):
 
 (targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv')
 tokens=tokenzieSentence(data)
+print(tokens)
 
 #print tokens
