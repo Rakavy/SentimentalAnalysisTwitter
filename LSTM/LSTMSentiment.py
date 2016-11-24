@@ -1,7 +1,11 @@
 import pandas as pnd
+import theano
+from theano import config
+import theano.tensor as tensor
 import numpy as np
 import sympy as sym
 import nltk
+from collections import OrderedDict
 #nltk.download('punkt')
 
 popularWords = 5000
@@ -129,24 +133,31 @@ def init_param_lstm(dimension, params):
 
     return params
 
-"""def lstm_layer(state_below, options):
-    nsteps = state_below.shape[0]
+def lstmLayer(params, input_state, dimension, mask):
 
-    num_samples=1 if state_below.ndim !=3 else state_below.shape[1]
+    #Number of time steps (number of sequences interacting with each other)
+    nsteps = input_state.shape[0]
+
+    #Number of samples in batch
+    num_samples = input_state.shape[1]
 
     def _slice(_x, n, dim):
         if _x.ndim == 3:
             return _x[:, :, n * dim:(n + 1) * dim]
         return _x[:, n * dim:(n + 1) * dim]
 
-    def _step(m, x, h, c):
-        preact = tensor.dot(h_, tparams[_p(prefix, 'U')])
-        preact += x_
+    #TODO: really understand the following
+    def _step(m_, x_, h_, c_):
+        preact = tensor.dot(h, params['l_U'])
+        preact += x
 
-        i = tensor.nnet.sigmoid(_slice(preact, 0, options['dim_proj']))
-        f = tensor.nnet.sigmoid(_slice(preact, 1, options['dim_proj']))
-        o = tensor.nnet.sigmoid(_slice(preact, 2, options['dim_proj']))
-        c = tensor.tanh(_slice(preact, 3, options['dim_proj']))
+        activations=[tensor.nnet.sigmoid(preact[:,:,i*dimension:(i+1)*dimension]) for i in range(3)]
+
+        i=activations[0]
+        f=activations[1]
+        o=activations[2]
+
+        c=tensor.tanh(preact[:,:,3*dimension:4*dimension])
 
         c = f * c_ + i * c
         c = m_[:, None] * c + (1. - m_)[:, None] * c_
@@ -156,60 +167,56 @@ def init_param_lstm(dimension, params):
 
         return h, c
 
-    state_below = (tensor.dot(state_below, tparams[_p(prefix, 'W')]) +
-                   tparams[_p(prefix, 'b')])
+    input_state = (tensor.dot(input_state, params['l_W')]) +
+                   params['l_b')])
 
-    dim_proj = options['dim_proj']
     rval, updates = theano.scan(_step,
-                                sequences=[mask, state_below],
+                                sequences=[mask, input_state],
                                 outputs_info=[tensor.alloc(numpy_floatX(0.),
                                                            n_samples,
-                                                           dim_proj),
+                                                           dimension),
                                               tensor.alloc(numpy_floatX(0.),
                                                            n_samples,
-                                                           dim_proj)],
-                                name=_p(prefix, '_layers'),
+                                                           dimension)],
+                                name='l_layers',
                                 n_steps=nsteps)
-    return rval[0]"""
+    return rval[0]
 
-def predict():
-    return None
+SEED=11;
 
-def buildModel(params, dimension, ):
+def buildModel(params, dimension):
     trng = np.random.seed(SEED)
 
 
-    x = np.matrix(dtype='int64')
-    mask = np.matrix('mask', dtype=config.floatX)
+    x = tensor.matrix('x', dtype='int64')
+    mask = tensor.matrix('mask', dtype='float16')
     y = tensor.vector('y', dtype='int64')
 
     n_timesteps = x.shape[0]
     n_samples = x.shape[1]
 
-    emb = tparams['Wemb'][x.flatten()].reshape([n_timesteps,
-                                                n_samples,
-                                                options['dim_proj']])
-    proj = get_layer(options['encoder'])[1](tparams, emb, options,
-                                            prefix=options['encoder'],
-                                            mask=mask)
-    if options['encoder'] == 'lstm':
-        proj = (proj * mask[:, :, None]).sum(axis=0)
-        proj = proj / mask.sum(axis=0)[:, None]
-    if options['use_dropout']:
-        proj = dropout_layer(proj, use_noise, trng)
+    #Pass input sequences through embedding layer
+    emb = params['Wemb'][x.flatten()].reshape([n_timesteps, n_samples, dimension])
 
-    pred = tensor.nnet.softmax(tensor.dot(proj, tparams['U']) + tparams['b'])
+    #Pass input sequences through LSTM layer
+    output = lstmLayer(params, emb, dimension,mask)
 
-    f_pred_prob = theano.function([x, mask], pred, name='f_pred_prob')
-    f_pred = theano.function([x, mask], pred.argmax(axis=1), name='f_pred')
+    #Get average prediction for output layer across input sequences
+    output = (output * mask[:, :, None]).sum(axis=0)
 
-    off = 1e-8
-    if pred.dtype == 'float16':
-        off = 1e-6
+    output = output / mask.sum(axis=0)[:, None]
 
-    cost = -tensor.log(pred[tensor.arange(n_samples), y] + off).mean()
+    #Create symbolic matrix of softmax computation of output layer
+    predict = tensor.nnet.softmax(tensor.dot(output, params['U']) + params['b'])
 
-    return use_noise, x, mask, y, f_pred_prob, f_pred, cost
+    predictFun = theano.function([x, mask], predict.argmax(axis=1), name='predictFun')
+
+    off = 1e-6
+
+    #TODO: change the following, since not using categories, regression instead
+    cost = -tensor.log(predict[tensor.arange(n_samples), y] + off).mean()
+
+    return x, mask, y, predictFun, cost
 
 
 
@@ -255,9 +262,12 @@ def trainNetwork(
 
     params=init_params(n_words, dim_proj, yDim)
 
-    x=np.matrix() #The data will sit here
-    mask=np.matrix() #1 is word at that location, 0 is sequence is already terminated(I think)
-    y=np.ndarray() #The target values or the output
+    sharedParams = OrderedDict()
+    for k in params.keys():
+        sharedParams[k] = theano.shared(params[k], name=k)
+
+    x, mask, y, predictF, cost=buildModel(sharedParams, dim_proj)
+
 
 
 
