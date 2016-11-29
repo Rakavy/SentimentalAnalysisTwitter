@@ -20,7 +20,7 @@ class Example(Frame):
         self.rowconfigure(3, weight=1)
         self.rowconfigure(5, pad=7)
         
-        lbl = Label(self, text="Search Term")
+        lbl = Label(self, text="Search Term: ")
         lbl.grid(sticky=E, pady=4, padx=5)
         
         area = Text(self)
@@ -39,8 +39,6 @@ class Example(Frame):
         obtn = Button(self, text="OK")
         obtn.grid(row=5, column=3)         
 
-def on_click(event):
-	
 
 def main():
   
