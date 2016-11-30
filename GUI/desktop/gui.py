@@ -2,8 +2,14 @@ from tkinter import *
 from twitter import twitterApi 
 
 def searchTweet(*args):
-     twitterApi(tweet.get())
-     foundTweet.set(tweet.get())
+    listTweets = twitterApi(tweet.get())
+    
+    for x in listTweets:
+        lblTweets.insert(END, x + '\n')
+
+    lblTweets.pack()
+    searchWord.set(tweet.get())
+    #foundTweet.set(listTweets)
     
 #def on_click(event):
 
@@ -21,8 +27,9 @@ mainFrame.rowconfigure(5, pad=7)
 
 tweet = StringVar() 
 foundTweet = StringVar()
+searchWord = StringVar()
 
-lblSearch = Label(mainFrame, text="Search Term:", width=10)
+lblSearch = Label(mainFrame, text="Search Word:", width=10)
 lblSearch.grid(row=2,column =0, pady=20)
 
 search = Entry(mainFrame,text="get", width=80, textvariable = tweet)
@@ -31,10 +38,13 @@ search.grid(row=2, column=1, pady=20, padx=10)
 abtn = Button(mainFrame, text="Go",width=4, command = searchTweet)
 abtn.grid(row=2, sticky=W,column=2,pady=20)
 
-lblTweets = Label(mainFrame, text="Search Term:", width=10)
-lblTweets.grid(row=3,column =0, pady=20)
+searchTweets = Label(mainFrame, textvariable = searchWord, width=10)
+searchTweets.grid(row=3,column =0, pady=20)
 
-lblTweets = Label(mainFrame, textvariable=foundTweet, width=10)
+lstTweets = Label(mainFrame, text="List of tweets:", width=10)
+lstTweets.grid(row=3,column =0, pady=20)
+
+lblTweets = Text(mainFrame,  width=10)
 lblTweets.grid(row=4,column =0, pady=20)
 
 cbtn = Button(mainFrame, text="Close")
