@@ -172,10 +172,10 @@ def lstmLayer(params, input_state, dimension, mask):
 
     rval, updates = theano.scan(_step,
                                 sequences=[mask, input_state],
-                                outputs_info=[tensor.alloc(numpy_floatX(0.),
+                                outputs_info=[tensor.alloc(np.asarray(0., dtype=np.float16),
                                                            n_samples,
                                                            dimension),
-                                              tensor.alloc(numpy_floatX(0.),
+                                              tensor.alloc(np.asarray(0., dtype=np.float16),
                                                            n_samples,
                                                            dimension)],
                                 name='l_layers',
@@ -218,8 +218,45 @@ def buildModel(params, dimension):
 
     return x, mask, y, predictFun, cost
 
+def sgd(lrate, params, grads, x, mask, y, cost):
+    #TODO: fuck around with Theano to understand what's going on in this function.
+    # New set of shared variable that will contain the gradient
+    # for a mini-batch.
+    gshared = [theano.shared(p.get_value() * 0., name='%s_grad' % k)
+               for k, p in params.items()]
+    gsup = [(gs, g) for gs, g in zip(gshared, grads)]
+
+    # Function that computes gradients for a mini-batch, but do not
+    # updates the weights.
+    f_grad_shared = theano.function([x, mask, y], cost, updates=gsup,
+                                    name='sgd_f_grad_shared')
+
+    pup = [(p, p - lrate * g) for p, g in zip(params.values(), gshared)]
+
+    # Function that updates the weights from the previously computed
+    # gradient.
+    f_update = theano.function([lrate], [], updates=pup,
+                               name='sgd_f_update')
+
+    return f_grad_shared, f_update
 
 
+#Gives the prediction error given input x, target y and lists of mini-batches idxLists
+def pred_error(pred_fct, prepare, x, y, idxLists):
+
+
+    validPred=0
+    for idxList in idxLists:
+        x, mask, y =prepare([x[t] for t in idxList],
+                             np.ndarray(y)[idxList])
+
+        predictions=pred_fct(x,mask)
+        targets=np.ndarray(y)[idxList]
+        validPred+=sum([1 for x in zip(predictions, targets) if x[0]==x[1]])
+
+    validPred=1.0-np.asarray(validPred, dtype=np.float16)/float(len(x))
+
+    return validPred
 
 (targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv')
 tokens=tokenzieSentence(data)
@@ -268,7 +305,123 @@ def trainNetwork(
 
     x, mask, y, predictF, cost=buildModel(sharedParams, dim_proj)
 
+    f_cost = theano.function([x, mask, y], cost, name='f_cost')
 
+    grads = tensor.grad(cost, wrt=list(sharedParams.values()))
+    f_grad = theano.function([x, mask, y], grads, name='f_grad')
+
+    lr = tensor.scalar(name='lr')
+    f_grad_shared, f_update = sgd(lr, sharedParams, grads,
+                                        x, mask, y, cost)
+
+    print('Optimization')
+
+    kf_valid = get_minibatches_idx(len(valid_setx), valid_batch_size)
+    kf_test = get_minibatches_idx(len(txtData), valid_batch_size)
+
+    print("%d train examples" % len(train_setx))
+    print("%d valid examples" % len(valid_sety))
+    print("%d test examples" % len(txtData))
+
+    history_errs = []
+    best_p = None
+    bad_count = 0
+
+    if validFreq == -1:
+        validFreq = len(train_setx) // batch_size
+    if saveFreq == -1:
+        saveFreq = len(train_setx) // batch_size
+
+    uidx = 0  # the number of update done
+    early_stp = False  # early stop
+    try:
+        for eidx in range(max_epochs):
+            n_samples = 0
+
+            # Get new shuffled index for the training set.
+            kf = get_minibatches_idx(len(train[0]), batch_size, shuffle=True)
+
+            for _, train_index in kf:
+                uidx += 1
+
+                # Select the random examples for this minibatch
+                y = [train_sety[t] for t in train_index]
+                x = [train_setx[t] for t in train_index]
+
+                # Get the data in numpy.ndarray format
+                # This swap the axis!
+                # Return something of shape (minibatch maxlen, n samples)
+                x, mask, y = prepare_data(x, y)
+                n_samples += x.shape[1]
+
+                cost = f_grad_shared(x, mask, y)
+                f_update(lrate)
+
+                if np.isnan(cost) or np.isinf(cost):
+                    print('bad cost detected: ', cost)
+                    return 1., 1., 1.
+
+                if np.mod(uidx, dispFreq) == 0:
+                    print('Epoch ', eidx, 'Update ', uidx, 'Cost ', cost)
+
+                if saveto and np.mod(uidx, saveFreq) == 0:
+
+                    params=best_p if best_p is not None else unzip(sharedParams)
+
+                    np.savez(saveto, history_errs=history_errs, **params)
+
+                if np.mod(uidx, validFreq) == 0:
+                    train_err = pred_error(f_pred, prepare_data, train_setx, train_sety, kf)
+                    valid_err = pred_error(f_pred, prepare_data, valid_sety, valid_sety, kf_valid)
+
+                    test_err = pred_error(f_pred, prepare_data, txtData, targets, kf_test)
+
+                    history_errs.append([valid_err, test_err])
+
+                    if (best_p is None or
+                        valid_err <= np.array(history_errs)[:, 0].min()):
+
+                        best_p = unzip(tparams)
+                        bad_counter = 0
+
+                    print('Train ', train_err, 'Valid ', valid_err,
+                           'Test ', test_err)
+
+                    if (len(history_errs) > patience and
+                        valid_err >= np.array(history_errs)[:-patience,
+                                                               0].min()):
+                        bad_counter += 1
+                        if bad_counter > patience:
+                            print('Early Stop!')
+                            early_stp = True
+                            break
+
+            print('Seen %d samples' % n_samples)
+
+            if early_stp:
+                break
+
+    except KeyboardInterrupt:
+        print("Training interupted")
+
+    if best_p is not None:
+        zipp(best_p, sharedParams)
+    else:
+        best_p = unzip(sharedParams)
+
+    kf_train_sorted = get_minibatches_idx(len(train_setx), batch_size)
+    train_err = pred_error(f_pred, prepare_data, train_setx, train_sety, kf_train_sorted)
+    valid_err = pred_error(f_pred, prepare_data, valid_setx, valid_sety, kf_valid)
+    test_err = pred_error(f_pred, prepare_data, txtData, targets, kf_test)
+
+    print( 'Train ', train_err, 'Valid ', valid_err, 'Test ', test_err )
+    if saveto:
+        numpy.savez(saveto, train_err=train_err,
+                    valid_err=valid_err, test_err=test_err,
+                    history_errs=history_errs, **best_p)
+    print('The code run for %d epochs, with %f sec/epochs' % (eidx + 1))
+
+    return train_err, valid_err, test_err
 
 
 
@@ -277,4 +430,4 @@ def trainNetwork(
 
 #print(freq)
 
-print indexTweets
+print(indexTweets)

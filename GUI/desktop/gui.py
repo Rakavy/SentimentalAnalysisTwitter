@@ -46,6 +46,4 @@ lblEmpty.grid(row=2,column =3, pady=20)
 search.focus()
 root.bind('<Return>', searchTweet)
 
-root.mainloop()  
-
-
+root.mainloop()
