@@ -98,9 +98,9 @@ lstTweets.grid(row=4,column =0, sticky=S,padx=10)
 
 lblTweets = Text(mainFrame, width=150, height=60)
 lblTweets.grid(row=5,column =0, sticky=N, padx=5)
-lblTweets.tag_config("pos", background="white", foreground="#00FF40")
+lblTweets.tag_config("pos", background="white", foreground="#458B00")
 lblTweets.tag_config("neg", background="white", foreground="#FF0000")
-lblTweets.tag_config("neu", background="white", foreground="#00BFFF")
+lblTweets.tag_config("neu", background="white", foreground="#0000CD")
 
 # scroll.config (command=lblTweets.yview)
 # scroll.grid(row=5, column=0)
