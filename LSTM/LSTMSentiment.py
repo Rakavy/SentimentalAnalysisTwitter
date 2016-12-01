@@ -20,7 +20,7 @@ def readCSV(filePath):
 
     csvTwitter=pnd.read_csv(filePath,header=None,encoding='latin-1').values[:20000,:]
 
-    print(len(csvTwitter[:,0]))
+
 
     tSentiments=csvTwitter[:,0]
     textData=preprocess(csvTwitter[:,5])
@@ -71,7 +71,7 @@ def indexWords(dictWords):
     indexedWords = dict()
 
     for idx, ss in enumerate(sorted_idx):
-        indexedWords[keys[ss]] = idx+2
+        indexedWords[keys[ss]] = idx+2 if idx<4997 else 0
         #print keys[ss], (idx+2)
 
     #print np.sum(counts), ' total words ', len(keys), ' unique words'
@@ -285,7 +285,7 @@ def trainNetwork(
         maxlen=100,  # Sequence longer then this get ignored
         batch_size=16,  # The batch size during training.
         valid_batch_size=64,  # The batch size used for validation/test set.
-        reload_model='lstm_model.npz',  # Path to a saved model we want to start from.
+        reload_model=None,  # Path to a saved model we want to start from.
 ):
 
     #Split the data between training set and validation set
@@ -450,16 +450,12 @@ def trainNetwork(
 #print(freq)
 
 
-(targets, tweets)=readCSV('../Resources/Sentiment140/TestingData.csv')
-
-print(len(targets))
-
-(targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv')
-targets=map(lambda x: x//2,targets)
+(targets, data)=readCSV('../Resources/Sentiment140/trainingdata2.csv')
+targets=list(map(lambda x: x//2,targets))
 tokens=tokenzieSentence(data)
 freq=wordFrequency(tokens)
-indexWords = indexWords(freq)
-indexTweets = replaceWordWithIndex(tokens, indexWords)
+indexWordList = indexWords(freq)
+indexTweets = replaceWordWithIndex(tokens, indexWordList)
 
 trainNetwork(indexTweets,targets)
 
@@ -470,6 +466,6 @@ pred_f=loadPredict_f('lstm_model.npz',5000,128,3)
 example="I have a Iran addiction. Thank you for pointing that out."
 
 example_format=tokenzieSentence([example])
-test=replaceWordWithIndex(example_format,indexWords)
+test=replaceWordWithIndex(example_format,indexWordList)
 
 print(testExample(pred_f, test[0]))
