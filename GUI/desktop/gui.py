@@ -61,11 +61,11 @@ def closeGui():
     sys.exit()
 
 root = Tk()
-root.geometry("1200x800+400+20")
+root.geometry("1300x700+400+20")
 mainFrame = Frame(root,background="white")
     
 root.title("Twitter Sentimental Analysis")
-mainFrame.pack(fill=BOTH, expand=True)
+mainFrame.pack(fill=BOTH, expand=False)
 
 mainFrame.columnconfigure(0, weight=1)
 mainFrame.columnconfigure(3, pad=7)
