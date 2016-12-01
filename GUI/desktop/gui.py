@@ -1,11 +1,31 @@
 from tkinter import *
-from twitter import twitterApi 
+from twitter import twitterApi
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
+from matplotlib.figure import Figure
 
+#pi chart labels
+labels = 'Positive', 'Neutral', 'Negative'
+sizes = [15, 30, 20]
+colors = ['#00FF40','#00BFFF', '#FF0000']
+
+f = Figure(figsize=(5,4),dpi=100)
+a=f.add_subplot(111)
 
 def searchTweet(*args):
     word = tweet.get()
     word.replace(" ","+")
     word.replace("#", "%23")
+    global labels
+    global colors
+    global f
+    global a
+    sizes = [20,10,10]
+    a.clear()
+    a.pie(sizes, labels=labels, colors=colors,
+            autopct='%1.1f%%', shadow=True, startangle=90)
+    a.axis('equal')
+    figure.draw()
     listTweets = twitterApi(word)
     lblTweets.delete('1.0', END) 
 
@@ -14,20 +34,6 @@ def searchTweet(*args):
         lblTweets.insert(END, x + '\n')
 
     searchWord.set(word)
-    #foundTweet.set(listTweets)
-    
-#def on_click(event):
-
-def convert65536(s):
-    #Converts a string with out-of-range characters in it into a string with codes in it.
-    l=list(s);
-    i=0;
-    while i<len(l):
-        o=ord(l[i]);
-        if o>65535:
-            l[i]="{"+str(o)+"ū}";
-        i+=1;
-    return "".join(l);
 
 root = Tk()
 root.geometry("1000x800+800+20")
@@ -44,31 +50,32 @@ tweet = StringVar()
 searchWord = StringVar()
 
 lblSearch = Label(mainFrame, text="Word:", width=10)
-lblSearch.grid(row=2,column =0, pady=20)
-
-search = Entry(mainFrame,text="get", width=80, textvariable = tweet)
-search.grid(row=2, column=1, pady=20, padx=10)
+lblSearch.grid(row=2,column =0, sticky=E, pady=20)
     
-abtn = Button(mainFrame, text="Go",width=4, command = searchTweet)
-abtn.grid(row=2, sticky=W,column=2,pady=20)
+abtn = Button(mainFrame, text="Go",width=10, command = searchTweet)
+abtn.grid(row=2, sticky=E,column=1,pady=20)
+
+search = Entry(mainFrame,text="get", width=48, textvariable = tweet)
+search.grid(row=2, column=1, sticky=W, pady=20, padx=10)
 
 searchTweets = Label(mainFrame, text="Searched Word:")
-searchTweets.grid(row=3,column =0,padx=10)
+searchTweets.grid(row=3,column =0, sticky=E, padx=10)
 
 searchTweets = Label(mainFrame, textvariable = searchWord, width=10)
 searchTweets.grid(row=3,column =1, padx=10)
 
 lstTweets = Label(mainFrame, text="List of tweets:", width=10)
-lstTweets.grid(row=4,column =0,padx=10)
+lstTweets.grid(row=4,column =0, sticky=S,padx=10)
 
 lblTweets = Text(mainFrame, width=150)
-lblTweets.grid(row=5,column =0, padx=10)
+lblTweets.grid(row=5,column =0, sticky=N, padx=10)
 
-cbtn = Button(mainFrame, text="Close")
-cbtn.grid(row=6, column=2, pady=4)
+figure = FigureCanvasTkAgg(f, master=mainFrame)
+figure.show()
+figure.get_tk_widget().grid(row=5, column =1, padx=10)
 
-lblEmpty = Label(mainFrame, text="", width=5)
-lblEmpty.grid(row=2,column =3, pady=20)
+cbtn = Button(mainFrame, text="Close", width=10)
+cbtn.grid(row=6, column=1,  pady=4)
 
 search.focus()
 root.bind('<Return>', searchTweet)
