@@ -1,6 +1,7 @@
 import pandas as pnd
 import theano
 from theano import config
+import mmap
 import theano.tensor as tensor
 import numpy as np
 import sympy as sym
@@ -17,14 +18,14 @@ preprocess=np.vectorize(processString)
 
 def readCSV(filePath):
 
-    csvTwitter=pnd.read_csv(filePath,header=None).values
+    csvTwitter=pnd.read_csv(filePath,header=None,encoding='latin-1').values[:20000,:]
 
     print(len(csvTwitter[:,0]))
 
     tSentiments=csvTwitter[:,0]
     textData=preprocess(csvTwitter[:,5])
 
-    return (tSentiments, textData)
+    return (tSentiments,textData)
 
 
 def tokenzieSentence(tweets):
@@ -136,19 +137,20 @@ def lstmLayer(params, input_state, dimension, mask):
     num_samples=input_state.shape[1] if input_state.ndim==3 else 1
 
     def step(m_, x_, h_, c_):
-        i=tensor.nnet.sigmoid(tensor.dot(params['l_W_i'],x_)+tensor.dot(params['l_U_i'],h_)+params['l_b_i'])
+        i=tensor.nnet.sigmoid(tensor.dot(x_,params['l_W_i'])+tensor.dot(h_,params['l_U_i'])+params['l_b_i'])
 
-        cnd=tensor.tanh(tensor.dot(params['l_W_c'],x_)+tensor.dot(params['l_U_c'],h_)+params['l_b_c'])
+        cnd=tensor.tanh(tensor.dot(x_,params['l_W_c'])+tensor.dot(h_,params['l_U_c'])+params['l_b_c'])
 
-        f=tensor.nnet.sigmoid(tensor.dot(params['l_W_f'],x_)+tensor.dot(params['l_U_f'],h_)+params['l_b_f'])
+        f=tensor.nnet.sigmoid(tensor.dot(x_,params['l_W_f'])+tensor.dot(h_,params['l_U_f'])+params['l_b_f'])
 
         c=i*cnd+f*c_
 
-        o=tensor.nnet.sigmoid(tensor.dot(params['l_W_o'],x_)+tensor.dot(params['l_U_o'],h_)+tensor.dot(params['l_V'],c)+params['l_b_o'])
+        o=tensor.nnet.sigmoid(tensor.dot(x_,params['l_W_o'])+tensor.dot(h_,params['l_U_o'])+tensor.dot(c,params['l_V'])+params['l_b_o'])
+
+        h=o*tensor.tanh(c)
 
         c=m_[:,None]*c+(1.-m_)[:,None]*c_
 
-        h=o*tensor.tanh(c)
         h=m_[:,None]*h+(1-m_)[:,None]*h_
 
         return h,c
@@ -203,19 +205,19 @@ def buildModel(params, dimension):
     return x, mask, y, predictFun, cost
 
 #Gives the prediction error given input x, target y and lists of mini-batches idxLists
-def pred_error(pred_fct, prepare, x, y, idxLists):
+def pred_error(pred_fct, prepare, data, y, idxLists):
 
 
     validPred=0
-    for idxList in idxLists:
-        x, mask, y =prepare([x[t] for t in idxList],
-                             np.ndarray(y)[idxList])
+    for _,idxList in idxLists:
+        x, mask =prepare([data[t] for t in idxList])
+
 
         predictions=pred_fct(x,mask)
-        targets=np.ndarray(y)[idxList]
+        targets=np.array(y)[idxList]
         validPred+=sum([1 for x in zip(predictions, targets) if x[0]==x[1]])
 
-    validPred=1.0-np.asarray(validPred, dtype=config.floatX)/float(len(x))
+    validPred=1.0-np.asarray(validPred, dtype=config.floatX)/float(len(data))
 
     return validPred
 
@@ -237,6 +239,34 @@ def prepareData(batch):
 
     return seqs,masks
 
+def reloadModel(path, n_words, dim, ydim):
+    params=init_params(n_words, dim_proj, yDim)
+
+    load_params(path,params)
+
+    return params
+
+def loadPredict_f(path, n_words, dim, ydim):
+    params=init_params(n_words, dim_proj, yDim)
+
+    load_params(path,params)
+
+    x, mask, y, predictF, loss=buildModel(sharedParams, dim_proj)
+
+    return predictF
+
+def testExample(predictF,tweet):
+    return predictF(tweet)
+
+def load_params(path, params):
+    pp = np.load(path)
+    for kk, vv in params.items():
+        if kk not in pp:
+            raise Warning('%s is not in the archive' % kk)
+        params[kk] = pp[kk]
+
+    return params
+
 def trainNetwork(
         txtData,
         target,
@@ -255,7 +285,7 @@ def trainNetwork(
         maxlen=100,  # Sequence longer then this get ignored
         batch_size=16,  # The batch size during training.
         valid_batch_size=64,  # The batch size used for validation/test set.
-        reload_model=None,  # Path to a saved model we want to start from.
+        reload_model='lstm_model.npz',  # Path to a saved model we want to start from.
 ):
 
     #Split the data between training set and validation set
@@ -267,9 +297,20 @@ def trainNetwork(
     valid_setx=txtData[:n_validSet]
     valid_sety=target[:n_validSet]
 
+    kf = getMiniBatches(len(train_setx), batch_size)
+
+
+    for _,idxList in kf:
+        x, mask =prepareData([train_setx[t] for t in idxList])
+
     yDim=max(train_sety)+1 #How many categories there are, 5 in our case (0-4), but technically only 3 (0,2,4)
 
+
+
     params=init_params(n_words, dim_proj, yDim)
+
+    if reload_model:
+        load_params('lstm_model.npz', params)
 
     sharedParams = OrderedDict()
     for k in params.keys():
@@ -319,7 +360,7 @@ def trainNetwork(
             n_samples = 0
 
             # Get new shuffled index for the training set.
-            kf = getMiniBatches(len(train_setx), batch_size)
+            kf = getMiniBatches(len(train_setx),batch_size,shuffle=True)
 
             for _, train_index in kf:
                 uidx += 1
@@ -346,22 +387,22 @@ def trainNetwork(
 
                 if saveto and np.mod(uidx, saveFreq) == 0:
 
-                    params=best_p if best_p is not None else unzip(sharedParams)
+                    params=best_p if best_p is not None else sharedParams
 
                     np.savez(saveto, history_errs=history_errs, **params)
 
                 if np.mod(uidx, validFreq) == 0:
-                    train_err = pred_error(f_pred, prepare_data, train_setx, train_sety, kf)
-                    valid_err = pred_error(f_pred, prepare_data, valid_sety, valid_sety, kf_valid)
+                    train_err = pred_error(predictF, prepareData, train_setx, train_sety, kf)
+                    valid_err = pred_error(predictF, prepareData, valid_setx, valid_sety, kf_valid)
 
-                    test_err = pred_error(f_pred, prepare_data, txtData, targets, kf_test)
+                    test_err = pred_error(predictF, prepareData, txtData, targets, kf_test)
 
                     history_errs.append([valid_err, test_err])
 
                     if (best_p is None or
                         valid_err <= np.array(history_errs)[:, 0].min()):
 
-                        best_p = unzip(tparams)
+                        best_p = params
                         bad_counter = 0
 
                     print('Train ', train_err, 'Valid ', valid_err,
@@ -384,15 +425,13 @@ def trainNetwork(
     except KeyboardInterrupt:
         print("Training interupted")
 
-    if best_p is not None:
-        zipp(best_p, sharedParams)
-    else:
-        best_p = unzip(sharedParams)
+    if best_p is  None:
+        best_p = sharedParams
 
     kf_train_sorted = getMiniBatches(len(train_setx), batch_size)
-    train_err = pred_error(f_pred, prepare_data, train_setx, train_sety, kf_train_sorted)
-    valid_err = pred_error(f_pred, prepare_data, valid_setx, valid_sety, kf_valid)
-    test_err = pred_error(f_pred, prepare_data, txtData, targets, kf_test)
+    train_err = pred_error(predictF, prepareData, train_setx, train_sety, kf_train_sorted)
+    valid_err = pred_error(predictF, prepareData, valid_setx, valid_sety, kf_valid)
+    test_err = pred_error(predictF, prepareData, txtData, targets, kf_test)
 
     print( 'Train ', train_err, 'Valid ', valid_err, 'Test ', test_err )
     if saveto:
@@ -416,11 +455,21 @@ def trainNetwork(
 print(len(targets))
 
 (targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv')
+targets=map(lambda x: x//2,targets)
 tokens=tokenzieSentence(data)
 freq=wordFrequency(tokens)
 indexWords = indexWords(freq)
 indexTweets = replaceWordWithIndex(tokens, indexWords)
 
-
-
 trainNetwork(indexTweets,targets)
+
+
+
+pred_f=loadPredict_f('lstm_model.npz',5000,128,3)
+
+example="I have a Iran addiction. Thank you for pointing that out."
+
+example_format=tokenzieSentence([example])
+test=replaceWordWithIndex(example_format,indexWords)
+
+print(testExample(pred_f, test[0]))
