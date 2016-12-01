@@ -11,13 +11,15 @@ from collections import OrderedDict
 popularWords = 5000
 
 def processString(stro):
-    return stro.translate(None, '@#')
+    return stro.translate(str.maketrans({key:None for key in '@#'}))
 
 preprocess=np.vectorize(processString)
 
 def readCSV(filePath):
 
     csvTwitter=pnd.read_csv(filePath,header=None).values
+
+    print(len(csvTwitter[:,0]))
 
     tSentiments=csvTwitter[:,0]
     textData=preprocess(csvTwitter[:,5])
@@ -41,15 +43,11 @@ def getMiniBatches(n, size, shuffle=False):
     if shuffle:
         np.random.shuffle(indexLst)
 
-    miniBatches=[indexLst[i*size:(i+1)*size] for i in range(n/size+1)]
+    miniBatches=[indexLst[i*size:(i+1)*size] for i in range(n//size+1)]
 
     return zip(range(len(miniBatches)), miniBatches)
 
-print(getMiniBatches(40,10))
-print(getMiniBatches(50,6,True))
 
-(targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv')
-tokens=tokenzieSentence(data)
 
 def wordFrequency(phraseArray):
     wordfreq = dict()
@@ -64,8 +62,8 @@ def wordFrequency(phraseArray):
     return wordfreq
 
 def indexWords(dictWords):
-    counts = dictWords.values()
-    keys = dictWords.keys()
+    counts = list(dictWords.values())
+    keys = list(dictWords.keys())
 
     sorted_idx = np.argsort(counts)[::-1]
 
@@ -98,20 +96,20 @@ def init_params(num_words, dimension, ydim):
     params = OrderedDict()
     # embedding
     randn = np.random.rand(num_words, dimension)
-    params['Wemb'] = (0.01 * randn).astype(np.float16)
+    params['Wemb'] = (0.01 * randn).astype(config.floatX)
 
     params = init_param_lstm(dimension,params)
 
     # classifier
-    params['U'] = 0.01 * np.random.randn(dimension, ydim).astype(np.float16)
-    params['b'] = np.zeros((ydim,)).astype(np.float16)
+    params['U'] = 0.01 * np.random.randn(dimension, ydim).astype(config.floatX)
+    params['b'] = np.zeros((ydim,)).astype(config.floatX)
 
     return params
 
 def ortho_weight(ndim):
     W = np.random.randn(ndim, ndim)
     u, s, v = np.linalg.svd(W)
-    return u.astype(np.float16)
+    return u.astype(config.floatX)
 
 def init_param_lstm(dimension, params):
     """
@@ -119,64 +117,50 @@ def init_param_lstm(dimension, params):
 
     """
 
-    #Weights for current value input
-    W = np.concatenate([ortho_weight(dimension) for i in range(4)], axis=1)
+    for gate in ['i','c','f','o']:
 
-    #Weights for memory value
-    U = np.concatenate([ortho_weight(dimension) for i in range(4)], axis=1)
+        params['_'.join(['l','W',gate])]=ortho_weight(dimension)
+        params['_'.join(['l','U',gate])]=ortho_weight(dimension)
+        params['_'.join(['l','b',gate])]=np.zeros((dimension,)).astype(config.floatX)
 
-    b = np.zeros((4*dimension,)).astype(np.float16)#array of 0s for biases
-
-    params['l_W'] = W
-    params['l_U'] = U
-    params['l_b'] = b
+    params['l_V']=ortho_weight(dimension)
 
     return params
 
 def lstmLayer(params, input_state, dimension, mask):
 
-    #Number of time steps (number of sequences interacting with each other)
+    #Number of time steps (number of word or character vectors interacting with each other)
     nsteps = input_state.shape[0]
 
-    #Number of samples in batch
-    num_samples = input_state.shape[1]
+    #Number of samples in the batch
+    num_samples=input_state.shape[1] if input_state.ndim==3 else 1
 
-    def _slice(_x, n, dim):
-        if _x.ndim == 3:
-            return _x[:, :, n * dim:(n + 1) * dim]
-        return _x[:, n * dim:(n + 1) * dim]
+    def step(m_, x_, h_, c_):
+        i=tensor.nnet.sigmoid(tensor.dot(params['l_W_i'],x_)+tensor.dot(params['l_U_i'],h_)+params['l_b_i'])
 
-    #TODO: really understand the following
-    def _step(m_, x_, h_, c_):
-        preact = tensor.dot(h, params['l_U'])
-        preact += x
+        cnd=tensor.tanh(tensor.dot(params['l_W_c'],x_)+tensor.dot(params['l_U_c'],h_)+params['l_b_c'])
 
-        activations=[tensor.nnet.sigmoid(preact[:,:,i*dimension:(i+1)*dimension]) for i in range(3)]
+        f=tensor.nnet.sigmoid(tensor.dot(params['l_W_f'],x_)+tensor.dot(params['l_U_f'],h_)+params['l_b_f'])
 
-        i=activations[0]
-        f=activations[1]
-        o=activations[2]
+        c=i*cnd+f*c_
 
-        c=tensor.tanh(preact[:,:,3*dimension:4*dimension])
+        o=tensor.nnet.sigmoid(tensor.dot(params['l_W_o'],x_)+tensor.dot(params['l_U_o'],h_)+tensor.dot(params['l_V'],c)+params['l_b_o'])
 
-        c = f * c_ + i * c
-        c = m_[:, None] * c + (1. - m_)[:, None] * c_
+        c=m_[:,None]*c+(1.-m_)[:,None]*c_
 
-        h = o * tensor.tanh(c)
-        h = m_[:, None] * h + (1. - m_)[:, None] * h_
+        h=o*tensor.tanh(c)
+        h=m_[:,None]*h+(1-m_)[:,None]*h_
 
-        return h, c
+        return h,c
 
-    input_state = (tensor.dot(input_state, params['l_W')]) +
-                   params['l_b')])
 
-    rval, updates = theano.scan(_step,
+    rval, updates = theano.scan(step,
                                 sequences=[mask, input_state],
-                                outputs_info=[tensor.alloc(np.asarray(0., dtype=np.float16),
-                                                           n_samples,
+                                outputs_info=[tensor.alloc(np.asarray(0., dtype=config.floatX),
+                                                           num_samples,
                                                            dimension),
-                                              tensor.alloc(np.asarray(0., dtype=np.float16),
-                                                           n_samples,
+                                              tensor.alloc(np.asarray(0., dtype=config.floatX),
+                                                           num_samples,
                                                            dimension)],
                                 name='l_layers',
                                 n_steps=nsteps)
@@ -184,12 +168,12 @@ def lstmLayer(params, input_state, dimension, mask):
 
 SEED=11;
 
+
 def buildModel(params, dimension):
     trng = np.random.seed(SEED)
 
-
     x = tensor.matrix('x', dtype='int64')
-    mask = tensor.matrix('mask', dtype='float16')
+    mask = tensor.matrix('mask', dtype=config.floatX)
     y = tensor.vector('y', dtype='int64')
 
     n_timesteps = x.shape[0]
@@ -218,29 +202,6 @@ def buildModel(params, dimension):
 
     return x, mask, y, predictFun, cost
 
-def sgd(lrate, params, grads, x, mask, y, cost):
-    #TODO: fuck around with Theano to understand what's going on in this function.
-    # New set of shared variable that will contain the gradient
-    # for a mini-batch.
-    gshared = [theano.shared(p.get_value() * 0., name='%s_grad' % k)
-               for k, p in params.items()]
-    gsup = [(gs, g) for gs, g in zip(gshared, grads)]
-
-    # Function that computes gradients for a mini-batch, but do not
-    # updates the weights.
-    f_grad_shared = theano.function([x, mask, y], cost, updates=gsup,
-                                    name='sgd_f_grad_shared')
-
-    pup = [(p, p - lrate * g) for p, g in zip(params.values(), gshared)]
-
-    # Function that updates the weights from the previously computed
-    # gradient.
-    f_update = theano.function([lrate], [], updates=pup,
-                               name='sgd_f_update')
-
-    return f_grad_shared, f_update
-
-
 #Gives the prediction error given input x, target y and lists of mini-batches idxLists
 def pred_error(pred_fct, prepare, x, y, idxLists):
 
@@ -254,17 +215,27 @@ def pred_error(pred_fct, prepare, x, y, idxLists):
         targets=np.ndarray(y)[idxList]
         validPred+=sum([1 for x in zip(predictions, targets) if x[0]==x[1]])
 
-    validPred=1.0-np.asarray(validPred, dtype=np.float16)/float(len(x))
+    validPred=1.0-np.asarray(validPred, dtype=config.floatX)/float(len(x))
 
     return validPred
 
-(targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv')
-tokens=tokenzieSentence(data)
-freq=wordFrequency(tokens)
-indexWords = indexWords(freq)
-indexTweets = replaceWordWithIndex(tokens, indexWords)
 
-init_param_lstm(5, {})
+def prepareData(batch):
+
+    maxLength=max(map(len,batch))
+
+    sequences=[tweet+[0]*(maxLength-len(tweet)) for tweet in batch]
+
+    masks=[[1]*len(tweet)+[0]*(maxLength-len(tweet)) for tweet in batch]
+
+    seqs = np.zeros((maxLength,len(batch))).astype('int64')
+    masks = np.zeros((maxLength, len(batch))).astype(theano.config.floatX)
+    for idx, s in enumerate(batch):
+        seqs[:len(batch[idx]), idx] = s
+        masks[:len(batch[idx]), idx] = 1.
+
+
+    return seqs,masks
 
 def trainNetwork(
         txtData,
@@ -272,6 +243,8 @@ def trainNetwork(
         valid_portion=0.05, #proportion of data used for validation
         dim_proj=128,  # word embeding dimension and LSTM number of hidden units.
         patience=10,  # Number of epoch to wait before early stop if no progress
+        lp_const=0.,  # Value of Lp Regularization parameters
+        l_norm=2, # Chosen norm for Regularization
         max_epochs=5000,  # The maximum number of epoch to run
         dispFreq=10,  # Display to stdout the training progress every N updates
         lrate=0.0001,  # Learning rate for sgd (not used for adadelta and rmsprop)
@@ -285,13 +258,12 @@ def trainNetwork(
         reload_model=None,  # Path to a saved model we want to start from.
 ):
 
-
     #Split the data between training set and validation set
 
-    n_validSet=np.round(float(len(txtData))*valid_portion)
+    n_validSet=int(np.round(float(len(txtData))*valid_portion))
 
     train_setx=txtData[n_validSet:]
-    train_sety=tarfet[n_validSet:]
+    train_sety=target[n_validSet:]
     valid_setx=txtData[:n_validSet]
     valid_sety=target[:n_validSet]
 
@@ -303,21 +275,29 @@ def trainNetwork(
     for k in params.keys():
         sharedParams[k] = theano.shared(params[k], name=k)
 
-    x, mask, y, predictF, cost=buildModel(sharedParams, dim_proj)
+    x, mask, y, predictF, loss=buildModel(sharedParams, dim_proj)
 
-    f_cost = theano.function([x, mask, y], cost, name='f_cost')
+    #Computing L2 Regularization
 
-    grads = tensor.grad(cost, wrt=list(sharedParams.values()))
-    f_grad = theano.function([x, mask, y], grads, name='f_grad')
+    if lp_const>0:
+        lp_const=theano.shared(np.asarray(lp_const, dtype=config.floatX), name="lp_const")
+        reg_val=lp_const*(sharedParams["U"]**l_norm).sum()
+        loss+=reg_val
 
-    lr = tensor.scalar(name='lr')
-    f_grad_shared, f_update = sgd(lr, sharedParams, grads,
-                                        x, mask, y, cost)
+
+    f_loss = theano.function([x, mask, y], loss, name='f_loss')
+
+    grads = tensor.grad(loss, wrt=list(sharedParams.values()))
+    gradient = theano.function([x, mask, y], grads, name='gradient')
+
+    updates=[(value, value-lrate*gr) for value,gr in zip(list(sharedParams.values()),grads)]
+
+    sgd=theano.function([x,mask,y],loss,updates=updates)
 
     print('Optimization')
 
-    kf_valid = get_minibatches_idx(len(valid_setx), valid_batch_size)
-    kf_test = get_minibatches_idx(len(txtData), valid_batch_size)
+    kf_valid = getMiniBatches(len(valid_setx), valid_batch_size)
+    kf_test = getMiniBatches(len(txtData), valid_batch_size)
 
     print("%d train examples" % len(train_setx))
     print("%d valid examples" % len(valid_sety))
@@ -339,7 +319,7 @@ def trainNetwork(
             n_samples = 0
 
             # Get new shuffled index for the training set.
-            kf = get_minibatches_idx(len(train[0]), batch_size, shuffle=True)
+            kf = getMiniBatches(len(train_setx), batch_size)
 
             for _, train_index in kf:
                 uidx += 1
@@ -348,21 +328,21 @@ def trainNetwork(
                 y = [train_sety[t] for t in train_index]
                 x = [train_setx[t] for t in train_index]
 
-                # Get the data in numpy.ndarray format
+                # Get the data in np.ndarray format
                 # This swap the axis!
                 # Return something of shape (minibatch maxlen, n samples)
-                x, mask, y = prepare_data(x, y)
+                y=np.array(y).astype('int64')
+                x, mask = prepareData(x)
                 n_samples += x.shape[1]
 
-                cost = f_grad_shared(x, mask, y)
-                f_update(lrate)
+                cur_loss = sgd(x, mask, y)
 
-                if np.isnan(cost) or np.isinf(cost):
-                    print('bad cost detected: ', cost)
+                if np.isnan(cur_loss) or np.isinf(cur_loss):
+                    print('bad loss detected: ', cur_loss)
                     return 1., 1., 1.
 
                 if np.mod(uidx, dispFreq) == 0:
-                    print('Epoch ', eidx, 'Update ', uidx, 'Cost ', cost)
+                    print('Epoch ', eidx, 'Update ', uidx, 'loss ', cur_loss)
 
                 if saveto and np.mod(uidx, saveFreq) == 0:
 
@@ -409,14 +389,14 @@ def trainNetwork(
     else:
         best_p = unzip(sharedParams)
 
-    kf_train_sorted = get_minibatches_idx(len(train_setx), batch_size)
+    kf_train_sorted = getMiniBatches(len(train_setx), batch_size)
     train_err = pred_error(f_pred, prepare_data, train_setx, train_sety, kf_train_sorted)
     valid_err = pred_error(f_pred, prepare_data, valid_setx, valid_sety, kf_valid)
     test_err = pred_error(f_pred, prepare_data, txtData, targets, kf_test)
 
     print( 'Train ', train_err, 'Valid ', valid_err, 'Test ', test_err )
     if saveto:
-        numpy.savez(saveto, train_err=train_err,
+        np.savez(saveto, train_err=train_err,
                     valid_err=valid_err, test_err=test_err,
                     history_errs=history_errs, **best_p)
     print('The code run for %d epochs, with %f sec/epochs' % (eidx + 1))
@@ -430,4 +410,17 @@ def trainNetwork(
 
 #print(freq)
 
-print(indexTweets)
+
+(targets, tweets)=readCSV('../Resources/Sentiment140/TestingData.csv')
+
+print(len(targets))
+
+(targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv')
+tokens=tokenzieSentence(data)
+freq=wordFrequency(tokens)
+indexWords = indexWords(freq)
+indexTweets = replaceWordWithIndex(tokens, indexWords)
+
+
+
+trainNetwork(indexTweets,targets)
