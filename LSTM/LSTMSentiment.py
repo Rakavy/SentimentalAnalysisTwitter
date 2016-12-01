@@ -16,9 +16,9 @@ def processString(stro):
 
 preprocess=np.vectorize(processString)
 
-def readCSV(filePath):
+def readCSV(filePath,max_sample_size):
 
-    csvTwitter=pnd.read_csv(filePath,header=None,encoding='latin-1').values[:20000,:]
+    csvTwitter=pnd.read_csv(filePath,header=None,encoding='latin-1').values[:max_sample_size,:]
 
 
 
@@ -450,7 +450,7 @@ def trainNetwork(
 #print(freq)
 
 
-(targets, data)=readCSV('../Resources/Sentiment140/trainingdata2.csv')
+(targets, data)=readCSV('../Resources/Sentiment140/trainingdata2.csv',5000)
 targets=list(map(lambda x: x//2,targets))
 tokens=tokenzieSentence(data)
 freq=wordFrequency(tokens)
