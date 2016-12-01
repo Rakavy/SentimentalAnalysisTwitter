@@ -240,18 +240,22 @@ def prepareData(batch):
     return seqs,masks
 
 def reloadModel(path, n_words, dim, ydim):
-    params=init_params(n_words, dim_proj, yDim)
+    params=init_params(n_words, dim, ydim)
 
     load_params(path,params)
 
     return params
 
 def loadPredict_f(path, n_words, dim, ydim):
-    params=init_params(n_words, dim_proj, yDim)
+    params=init_params(n_words, dim, ydim)
 
     load_params(path,params)
 
-    x, mask, y, predictF, loss=buildModel(sharedParams, dim_proj)
+    sharedParams = OrderedDict()
+    for k in params.keys():
+        sharedParams[k] = theano.shared(params[k], name=k)
+
+    x, mask, y, predictF, loss=buildModel(sharedParams, dim)
 
     return predictF
 
@@ -275,7 +279,7 @@ def trainNetwork(
         patience=10,  # Number of epoch to wait before early stop if no progress
         lp_const=0.,  # Value of Lp Regularization parameters
         l_norm=2, # Chosen norm for Regularization
-        max_epochs=5000,  # The maximum number of epoch to run
+        max_epochs=200,  # The maximum number of epoch to run
         dispFreq=10,  # Display to stdout the training progress every N updates
         lrate=0.0001,  # Learning rate for sgd (not used for adadelta and rmsprop)
         n_words=5000,  # Vocabulary size
@@ -438,7 +442,7 @@ def trainNetwork(
         np.savez(saveto, train_err=train_err,
                     valid_err=valid_err, test_err=test_err,
                     history_errs=history_errs, **best_p)
-    print('The code run for %d epochs, with %f sec/epochs' % (eidx + 1))
+    #print('The code run for %d epochs, with sec/epochs'.format(eidx + 1))
 
     return train_err, valid_err, test_err
 
@@ -449,23 +453,21 @@ def trainNetwork(
 
 #print(freq)
 
+def analyze(text):
+    (targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv',5000)
+    targets=list(map(lambda x: x//2,targets))
+    tokens=tokenzieSentence(data)
+    freq=wordFrequency(tokens)
+    indexWordList = indexWords(freq)
+    indexTweets = replaceWordWithIndex(tokens, indexWordList)
 
-(targets, data)=readCSV('../Resources/Sentiment140/trainingdata2.csv',5000)
-targets=list(map(lambda x: x//2,targets))
-tokens=tokenzieSentence(data)
-freq=wordFrequency(tokens)
-indexWordList = indexWords(freq)
-indexTweets = replaceWordWithIndex(tokens, indexWordList)
+    #trainNetwork(indexTweets,targets)
+    pred_f=loadPredict_f('lstm_model.npz',5000,128,3)
+    t = processString(text)
+    example_format=tokenzieSentence([t])
+    test = replaceWordWithIndex(example_format,indexWordList)
 
-trainNetwork(indexTweets,targets)
-
+    testExample(pred_f, test[0])
 
 
-pred_f=loadPredict_f('lstm_model.npz',5000,128,3)
 
-example="I have a Iran addiction. Thank you for pointing that out."
-
-example_format=tokenzieSentence([example])
-test=replaceWordWithIndex(example_format,indexWordList)
-
-print(testExample(pred_f, test[0]))
