@@ -252,14 +252,14 @@ def prepareData(batch):
     return seqs,masks
 
 def reloadModel(path, n_words, dim, ydim):
-    params=init_params(n_words, dim_proj, yDim)
+    params=init_params(n_words, dim, ydim)
 
     load_params(path,params)
 
     return params
 
 def loadPredict_f(path, n_words, dim, ydim):
-    params=init_params(n_words, dim_proj, yDim)
+    params=init_params(n_words, dim, ydim)
 
     load_params(path,params)
 
@@ -269,6 +269,7 @@ def loadPredict_f(path, n_words, dim, ydim):
 
 
     x, mask, y, predictF, loss=buildModel(sharedParams, dim_proj)
+
 
     return predictF
 
@@ -292,7 +293,7 @@ def load_params(path, params):
         patience=10,  # Number of epoch to wait before early stop if no progress
         lp_const=0.,  # Value of Lp Regularization parameters
         l_norm=2, # Chosen norm for Regularization
-        max_epochs=5000,  # The maximum number of epoch to run
+        max_epochs=200,  # The maximum number of epoch to run
         dispFreq=10,  # Display to stdout the training progress every N updates
         lrate=0.0001,  # Learning rate for sgd (not used for adadelta and rmsprop)
         n_words=5000,  # Vocabulary size
@@ -462,8 +463,6 @@ def load_params(path, params):
 
 
 
-#print(freq)
-
 (targets, data)=readCSV('../Resources/Sentiment140/trainingdata2.csv',5000)
 targets=list(map(lambda x: x//2,targets))
 tokens=tokenzieSentence(data)
@@ -474,10 +473,20 @@ indexTweets = replaceWordWithIndex(tokens, indexWordList)
 trainNetwork(indexTweets,targets)
 
 pred_f=loadPredict_f('lstm_model.npz',5000,128,3)
+=======
+def analyze(text):
+    (targets, data)=readCSV('../Resources/Sentiment140/TestingData.csv',5000)
+    targets=list(map(lambda x: x//2,targets))
+    tokens=tokenzieSentence(data)
+    freq=wordFrequency(tokens)
+    indexWordList = indexWords(freq)
+    indexTweets = replaceWordWithIndex(tokens, indexWordList)
 
-example="I have a Iran addiction. Thank you for pointing that out."
+    #trainNetwork(indexTweets,targets)
+    pred_f=loadPredict_f('lstm_model.npz',5000,128,3)
+    t = processString(text)
+    example_format=tokenzieSentence([t])
+    test = replaceWordWithIndex(example_format,indexWordList)
 
-example_format=tokenzieSentence([example])
-test=replaceWordWithIndex(example_format,indexWordList)
-
-print(testExample(pred_f, test[0]))
+    testExample(pred_f, test[0])
+>>>>>>> 1f804a50df1ff91f375b8d0cd92f1b000737ff28
