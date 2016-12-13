@@ -1,10 +1,8 @@
 import pandas as pnd
 import theano
 from theano import config
-import mmap
 import theano.tensor as tensor
 import numpy as np
-import sympy as sym
 import nltk
 from collections import OrderedDict
 #nltk.download('punkt')
@@ -14,26 +12,31 @@ popularWords = 5000
 
 class LSTMNetwork:
 
-    def __init__(self,trainPath='../Resources/Sentiment140/TestingData.csv',reloadModel=False,encode='latin-1',seed=47):
-        self.trainPath=trainPath
-        self.encode=encode
+    def __init__(self,trainPath='../Resources/Sentiment140/TestingData.csv',
+                 reloadModel=False, encode='latin-1', seed=47):
+        self.trainPath= trainPath
+        self.encode= encode
         np.random.seed(seed)
-        self.reloadModel=reloadModel
-        self.fctPredict=None
-        self.saveParams='lstm_model.npz'
-        self.train_setx=[]
-        self.train_sety=[]
-        self.valid_setx=[]
-        self.valid_sety=[]
+        self.reloadModel= reloadModel
+        self.fctPredict= None
+        self.saveParams= 'lstm_model.npz'
+        self.train_setx= []
+        self.train_sety= []
+        self.valid_setx= []
+        self.valid_sety= []
+        self.preprocess=np.vectorize(self.processString)
+        self.params = OrderedDict()
+        self.tweetData=[]
+        self.targets=[]
+
 
     def setupNetwork(self):
-        prepareAllData()
-        trainNetwork()
+        self.prepareAllData()
+        self.trainNetwork()
 
     def processString(self,stro):
         return stro.translate(str.maketrans({key:None for key in '@#'}))
 
-    self.preprocess=np.vectorize(processString)
 
     def readCSV(self,max_sample_size):
 
@@ -42,14 +45,14 @@ class LSTMNetwork:
         csvTwitter=csvTwitter.values[::len(csvTwitter.index)//max_sample_size,:]
 
         tSentiments=csvTwitter[:,0]
-        textData=preprocess(csvTwitter[:,5])
+        textData=self.preprocess(csvTwitter[:,5])
 
         return (tSentiments,textData)
 
     def prepareAllData(self):
-        (targets, data)=readCSV(self,500)
+        (targets, data)=self.readCSV(500)
 
-        targets=list(map(lambda x: x//2,targets))
+        targets=[x//2 for x in targets]
         tokens=self.tokenizeSentence(data)
 
         freq=self.wordFrequency(tokens)
@@ -60,10 +63,10 @@ class LSTMNetwork:
         self.targets=targets
 
 
-    def getPredictFun():
+    def getPredictFun(self):
         if self.fctPredict is None:
             return self.loadPredict_f(5000, 128, 3)
-        else
+        else:
             return self.fctPredict
 
     def tokenizeSentence(self,tweets):
@@ -76,7 +79,7 @@ class LSTMNetwork:
 
 
     #Every step, a subset of the training data is used. getMiniBatches return a list of sample indices to use
-    def getMiniBatches(self,n, size, shuffle=False):
+    def getMiniBatches(self, n, size, shuffle=False):
         indexLst=np.arange(n, dtype='int32')
 
         if shuffle:
@@ -87,6 +90,7 @@ class LSTMNetwork:
         return list(zip(range(len(miniBatches)), miniBatches))
 
     def wordFrequency(self,phraseArray):
+        """Returns list of word frequencies"""
         wordfreq = dict()
 
         for phrase in phraseArray:
@@ -132,7 +136,6 @@ class LSTMNetwork:
 
     def initialize(self,num_words, dimension, ydim):
 
-        self.params = OrderedDict()
         # embedding
         randn = np.random.rand(num_words, dimension)
         self.params['embedding'] = (0.01 * randn).astype(config.floatX)
@@ -164,7 +167,7 @@ class LSTMNetwork:
 
         self.params['l_V']=self.ortho_weight(dimension)
 
-        return params
+        return self.params
 
     def lstmLayer(self,params, input_state, dimension, mask):
 
@@ -174,7 +177,7 @@ class LSTMNetwork:
         #Number of samples in the batch
         num_samples=input_state.shape[1] if input_state.ndim==3 else 1
 
-        def lstmStep(self,m_, x_, h_, c_):
+        def lstmStep(m_, x_, h_, c_):
             i=tensor.nnet.sigmoid(tensor.dot(x_,params['l_W_i'])+tensor.dot(h_,params['l_U_i'])+params['l_b_i'])
 
             cnd=tensor.tanh(tensor.dot(x_,params['l_W_c'])+tensor.dot(h_,params['l_U_c'])+params['l_b_c'])
@@ -194,7 +197,7 @@ class LSTMNetwork:
             return h,c
 
 
-        retVal, updates = theano.scan(lstmStep,
+        retVal, _ = theano.scan(lstmStep,
                                     sequences=[mask, input_state],
                                     outputs_info=[tensor.alloc(np.asarray(0., dtype=config.floatX),
                                                                num_samples,
@@ -219,13 +222,13 @@ class LSTMNetwork:
         emb = params['embedding'][x.flatten()].reshape([n_timesteps, n_samples, dimension])
 
         #Pass input sequences through LSTM layer
-        out = lstmLayer(params, emb, dimension,mask)
+        out = self.lstmLayer(params, emb, dimension,mask)
 
         #Get average prediction for output layer across input sequences
         out = (out * mask[:, :, None]).sum(axis=0)/ mask.sum(axis=0)[:, None]
 
        #Create symbolic matrix of softmax computation of output layer
-        predict = tensor.nnet.softmax(tensor.dot(output, params['U']) + params['b'])
+        predict = tensor.nnet.softmax(tensor.dot(out, params['U']) + params['b'])
 
         predictFun = theano.function([x, mask], predict.argmax(axis=1), name='predictFun')
 
@@ -262,16 +265,12 @@ class LSTMNetwork:
 
         params = OrderedDict()
         for k, v in zipped.items():
-            params[kk] = v.get_value()
+            params[k] = v.get_value()
         return params
 
     def prepareData(self,batch):
 
         maxLength=max(map(len,batch))
-
-        sequences=[tweet+[0]*(maxLength-len(tweet)) for tweet in batch]
-
-        masks=[[1]*len(tweet)+[0]*(maxLength-len(tweet)) for tweet in batch]
 
         seqs = np.zeros((maxLength,len(batch))).astype('int64')
         masks = np.zeros((maxLength, len(batch))).astype(theano.config.floatX)
@@ -284,7 +283,7 @@ class LSTMNetwork:
     def getSharedParams(self):
         sharedParams = OrderedDict()
         for k in self.params.keys():
-            sharedParams[k] = theano.shared(params[k], name=k)
+            sharedParams[k] = theano.shared(self.params[k], name=k)
 
         return sharedParams
 
@@ -295,7 +294,7 @@ class LSTMNetwork:
 
         sharedParams=self.getSharedParams()
 
-        x, mask, y, predictF, loss=self.createNetwork(sharedParams, embDim)
+        x, mask, y, predictF, loss=self.createNetwork(sharedParams, dim)
 
         return predictF
 
@@ -304,9 +303,9 @@ class LSTMNetwork:
 
     def loadParams(self):
         loaded = np.load(self.saveParams)
-        for k, v in self.params.items():
+        for k, _ in self.params.items():
             try:
-                self.params[k] = pp[k]
+                self.params[k] = loaded[k]
             except KeyError:
                 pass
 
@@ -332,14 +331,12 @@ class LSTMNetwork:
 
         return trainErr,validErr,testErr
 
-    def getSGD(x,mask,y,loss,lrate,params):
-        f_loss = theano.function([x, mask, y], loss, name='f_loss')
+    def getSGD(self,x,mask,y,loss,lrate,params):
 
-        grads = tensor.grad(loss, wrt=list(sharedParams.values()))
-        gradient = theano.function([x, mask, y], grads, name='gradient')
+        grads = tensor.grad(loss, wrt=list(params.values()))
 
         lr=theano.shared(lrate, name='lr')
-        updates=[(value, value-lr*gr) for value,gr in list(zip(list(sharedParams.values()),grads))]
+        updates=[(value, value-lr*gr) for value,gr in list(zip(list(params.values()),grads))]
 
         sgd=theano.function([x,mask,y],loss,updates=updates)
 
@@ -359,25 +356,25 @@ class LSTMNetwork:
 
         #Split the data between training set and validation set
 
-        train_setx,train_sety,valid_setx,valid_sety=splitData(validSubset)
+        train_setx,train_sety,valid_setx,valid_sety=self.splitData(validSubset)
 
-        trainBatch = self.getMiniBatches(len(train_setx), batchSz, shuffle=True)
+        trainBatch = self.getMiniBatches(len(train_setx), batchSz, True)
 
         for _,idxList in trainBatch:
             x, mask =self.prepareData([train_setx[t] for t in idxList])
 
         yDim=max(train_sety)+1 #How many categories there are, 5 in our case (0-4), but technically only 3 (0,2,4)
 
-        initialize(vocabLen, embDim, yDim)
+        self.initialize(vocabLen, embDim, yDim)
 
-        sharedParams = getSharedParams()
+        sharedParams = self.getSharedParams()
 
         x, mask, y, predictF, loss=self.createNetwork(sharedParams, embDim)
 
-        sgd=self.getSGD(x, mask, y, loss, sharedParams)
+        sgd=self.getSGD(x, mask, y, loss, lrate, sharedParams)
 
-        validBatches = self.getMiniBatches(len(valid_setx), batchSz*4, shuffle=True)
-        testBatches = self.getMiniBatches(len(self.tweetData), batchSz*4, shuffle=True)
+        validBatches = self.getMiniBatches(len(valid_setx), batchSz*4, True)
+        testBatches = self.getMiniBatches(len(self.tweetData), batchSz*4, True)
 
         print(str(len(train_setx))+" train examples")
         print(str(len(valid_sety))+" valid examples")
@@ -396,7 +393,7 @@ class LSTMNetwork:
 
         for i in range(maxEpochs):
 
-            trainBatch = getMiniBatches(len(train_setx),batchSz,shuffle=True)
+            trainBatch = self.getMiniBatches(len(train_setx),batchSz,True)
 
             for _, train_index in trainBatch:
                 num_updates += 1
@@ -429,13 +426,13 @@ class LSTMNetwork:
                         valid_err <= np.array(lastErrors)[:, 0].min()):
 
                         optimalParams = self.unshare(sharedParams)
-                        decreaseCnter = 0
+                        decreaseCnt = 0
 
                     if (len(lastErrors) > stopRule and
                         valid_err >= np.array(lastErrors)[:-stopRule,
                                                                0].min()):
-                        decreaseCnter += 1
-                        if decreaseCnter > stopRule:
+                        decreaseCnt += 1
+                        if decreaseCnt > stopRule:
                             stop = True
                             break
 
