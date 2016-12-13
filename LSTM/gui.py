@@ -1,4 +1,4 @@
-from LSTMSentiment import analyze
+from LSTMSentiment import LSTMNetwork
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
 from matplotlib.figure import Figure
@@ -33,6 +33,9 @@ def searchTweet(*args):
     word = tweet.get()
     word.replace(" ", "+")
     word.replace("#", "%23")
+
+    neuralNet=LSTMNetwork()
+    
 
     listTweets = twitterApi(word)
     lblTweets.delete('1.0', END)
@@ -97,7 +100,7 @@ searchTweets.grid(row=3, column=1, padx=10)
 lstTweets = Label(mainFrame, text="List of tweets:", width=12)
 lstTweets.grid(row=4, column=0, sticky=S, padx=10)
 
-frame3 = Frame(mainFrame)  
+frame3 = Frame(mainFrame)
 frame3.grid(row=5, column=0, sticky='W', padx=10)
 
 lblTweets = Text(frame3, width=60)

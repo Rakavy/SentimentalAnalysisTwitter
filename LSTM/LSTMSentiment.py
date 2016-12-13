@@ -14,14 +14,21 @@ popularWords = 5000
 
 class LSTMNetwork:
 
-    def __init__(self,trainPath,reloadModel=False,encode,seed):
+    def __init__(self,trainPath='../Resources/Sentiment140/TestingData.csv',reloadModel=False,encode='latin-1',seed=47):
         self.trainPath=trainPath
         self.encode=encode
         np.random.seed(seed)
         self.reloadModel=reloadModel
-        self.saveParams='lstm_model.npz',
+        self.fctPredict=None
+        self.saveParams='lstm_model.npz'
+        self.train_setx=[]
+        self.train_sety=[]
+        self.valid_setx=[]
+        self.valid_sety=[]
 
-    def setNetwork()
+    def setupNetwork(self):
+        prepareAllData()
+        trainNetwork()
 
     def processString(self,stro):
         return stro.translate(str.maketrans({key:None for key in '@#'}))
@@ -40,7 +47,7 @@ class LSTMNetwork:
         return (tSentiments,textData)
 
     def prepareAllData(self):
-        (targets, data)=readCSV(self,100)
+        (targets, data)=readCSV(self,500)
 
         targets=list(map(lambda x: x//2,targets))
         tokens=self.tokenizeSentence(data)
@@ -52,6 +59,12 @@ class LSTMNetwork:
         self.tweetData=indexTweets
         self.targets=targets
 
+
+    def getPredictFun():
+        if self.fctPredict is None:
+            return self.loadPredict_f(5000, 128, 3)
+        else
+            return self.fctPredict
 
     def tokenizeSentence(self,tweets):
         tokenizedPhrase = []
@@ -181,7 +194,7 @@ class LSTMNetwork:
             return h,c
 
 
-        rval, updates = theano.scan(lstmStep,
+        retVal, updates = theano.scan(lstmStep,
                                     sequences=[mask, input_state],
                                     outputs_info=[tensor.alloc(np.asarray(0., dtype=config.floatX),
                                                                num_samples,
@@ -191,10 +204,7 @@ class LSTMNetwork:
                                                                dimension)],
                                     name='l_layers',
                                     n_steps=nsteps)
-        return rval[0]
-
-
-
+        return retVal[0]
 
     def createNetwork(self,params, dimension):
 
@@ -209,35 +219,31 @@ class LSTMNetwork:
         emb = params['embedding'][x.flatten()].reshape([n_timesteps, n_samples, dimension])
 
         #Pass input sequences through LSTM layer
-        output = lstmLayer(params, emb, dimension,mask)
+        out = lstmLayer(params, emb, dimension,mask)
 
         #Get average prediction for output layer across input sequences
-        output = (output * mask[:, :, None]).sum(axis=0)
+        out = (out * mask[:, :, None]).sum(axis=0)/ mask.sum(axis=0)[:, None]
 
-        output = output / mask.sum(axis=0)[:, None]
-
-        #Create symbolic matrix of softmax computation of output layer
+       #Create symbolic matrix of softmax computation of output layer
         predict = tensor.nnet.softmax(tensor.dot(output, params['U']) + params['b'])
 
         predictFun = theano.function([x, mask], predict.argmax(axis=1), name='predictFun')
 
-        off = 1e-8
-
-        cost = -tensor.log(predict[tensor.arange(n_samples), y] + off).mean()
+        cost = -tensor.log(predict[tensor.arange(n_samples), y] + 1e-8).mean()
 
         return x, mask, y, predictFun, cost
 
     #Gives the prediction error given input x, target y and lists of mini-batches idxLists
     def getErrorRate(self,pred_fct, data, y, idxLists, pred_prob=None):
 
-        validPred=0
+        validPred=0.0
         for _,idxList in idxLists:
             x, mask =self.prepareData([data[t] for t in idxList])
 
             predictions=pred_fct(x,mask)
             if(pred_prob):
                 print(pred_prob(x,mask))
-            #print(predictions)
+
             targets=np.array(y)[idxList]
             validPred+=sum([1 for x in zip(predictions, targets) if x[0]==int(x[1])])
 
@@ -246,18 +252,18 @@ class LSTMNetwork:
         return validPred
 
     def reassign(self,params, tparams):
-        for kk, vv in params.items():
-            tparams[kk].set_value(vv)
+        for k, v in params.items():
+            tparams[k].set_value(v)
 
         return params
 
 
-    def self.unshare(self,zipped):
+    def unshare(self,zipped):
 
-        new_params = OrderedDict()
-        for kk, vv in zipped.items():
-            new_params[kk] = vv.get_value()
-        return new_params
+        params = OrderedDict()
+        for k, v in zipped.items():
+            params[kk] = v.get_value()
+        return params
 
     def prepareData(self,batch):
 
@@ -275,100 +281,58 @@ class LSTMNetwork:
 
         return seqs,masks
 
-    def reloadModel(self,path, n_words, dim, ydim):
-        initialize(n_words, dim, ydim)
-
-        load_params()
-
-        return params
-
     def getSharedParams(self):
         sharedParams = OrderedDict()
-        for k in params.keys():
+        for k in self.params.keys():
             sharedParams[k] = theano.shared(params[k], name=k)
 
+        return sharedParams
 
-    def loadPredict_f(self, n_words, dim, ydim):
-        params=initialize(n_words, dim, ydim)
+    def loadPredict_f(self, vocabLen, dim, ydim):
+        self.initialize(vocabLen, dim, ydim)
 
-        load_params()
+        self.loadParams()
 
+        sharedParams=self.getSharedParams()
 
-        x, mask, y, predictF, loss, predictProb=self.createNetwork(sharedParams, dim_proj)
-
+        x, mask, y, predictF, loss=self.createNetwork(sharedParams, embDim)
 
         return predictF
 
     def testExample(self,predictF,tweet):
         return predictF(tweet)
 
-    def load_params(self):
-        pp = np.load(self.saveParams)
-        for kk, vv in self.params.items():
-            if kk not in pp:
-                raise Warning('%s is not in the archive' % kk)
-            self.params[kk] = pp[kk]
+    def loadParams(self):
+        loaded = np.load(self.saveParams)
+        for k, v in self.params.items():
+            try:
+                self.params[k] = pp[k]
+            except KeyError:
+                pass
 
         return self.params
 
-    def trainNetwork(
-        valid_portion=0.05, #proportion of data used for validation
-        dim_proj=128,  # word embeding dimension and LSTM number of hidden units.
-        patience=10,  # Number of epoch to wait before early stop if no progress
-        lp_const=0.,  # Value of Lp Regularization parameters
-        l_norm=2, # Chosen norm for Regularization
-        max_epochs=500,  # The maximum number of epoch to run
-        dispFreq=10,  # Display to stdout the training progress every N updates
-        lrate=0.05,  # Learning rate for sgd (not used for adadelta and rmsprop)
-        n_words=5000,  # Vocabulary size
-        validFreq=370,  # Compute the validation error after this number of update.
-        saveFreq=1110,  # Save the parameters after every saveFreq updates
-        maxlen=100,  # Sequence longer then this get ignored
-        batch_size=16,  # The batch size during training.
-        valid_batch_size=64,  # The batch size used for validation/test set.
-        reload_model=None,  # Path to a saved model we want to start from.
-    ):
+    def splitData(self, validPortion):
+        n_validSet=int(np.round(float(len(self.tweetData))*validPortion))
 
-        #Split the data between training set and validation set
+        self.train_setx=self.tweetData[n_validSet:]
+        self.train_sety=self.targets[n_validSet:]
+        self.valid_setx=self.tweetData[:n_validSet]
+        self.valid_sety=self.targets[:n_validSet]
 
-        n_validSet=int(np.round(float(len(self.tweetData))*valid_portion))
+        return self.train_setx,self.train_sety,self.valid_setx,self.valid_sety
 
-        train_setx=self.tweetData[n_validSet:]
-        train_sety=self.targets[n_validSet:]
-        valid_setx=self.tweetData[:n_validSet]
-        valid_sety=self.targets[:n_validSet]
+    def getAllErrors(self,pred_f,trainBatch,validBatch,testBatch,disp=True):
+        trainErr = self.getErrorRate(pred_f, self.train_setx, self.train_sety, trainBatch)
+        validErr = self.getErrorRate(pred_f, self.valid_setx, self.valid_sety, validBatch)
+        testErr = self.getErrorRate(pred_f, self.tweetData, self.targets, testBatch)
 
-        kf = self.getMiniBatches(len(train_setx), batch_size, shuffle=True)
+        if disp:
+            print( 'Train ', trainErr, 'Valid ', validErr, 'Test ', testErr )
 
-        for _,idxList in kf:
-            x, mask =self.prepareData([train_setx[t] for t in idxList])
+        return trainErr,validErr,testErr
 
-        print(x)
-        print(mask)
-
-
-
-        yDim=max(train_sety)+1 #How many categories there are, 5 in our case (0-4), but technically only 3 (0,2,4)
-
-        params=initialize(n_words, dim_proj, yDim)
-
-        if reload_model:
-            load_params('lstm_model.npz', params)
-
-        sharedParams = OrderedDict()
-        for k in params.keys():
-            sharedParams[k] = theano.shared(params[k], name=k)
-
-        x, mask, y, predictF, loss=self.createNetwork(sharedParams, dim_proj)
-
-        #Computing L2 Regularization
-
-        #if lp_const>0:
-        #    lp_const=theano.shared(np.asarray(lp_const, dtype=config.floatX), name="lp_const")
-        #    reg_val=lp_const*(sharedParams["U"]**l_norm).sum()
-        #    loss+=reg_val
-
-
+    def getSGD(x,mask,y,loss,lrate,params):
         f_loss = theano.function([x, mask, y], loss, name='f_loss')
 
         grads = tensor.grad(loss, wrt=list(sharedParams.values()))
@@ -379,124 +343,125 @@ class LSTMNetwork:
 
         sgd=theano.function([x,mask,y],loss,updates=updates)
 
-        print('Optimization')
+        return sgd
 
-        kf_valid = self.getMiniBatches(len(valid_setx), valid_batch_size, shuffle=True)
-        kf_test = self.getMiniBatches(len(self.tweetData), valid_batch_size, shuffle=True)
+    def trainNetwork(
+        self,
+        validSubset=0.05, #proportion of data used for validation
+        embDim=128,  # length of embedding vector and number of hidden units
+        stopRule=10,  # Stop if no progress in n epochs
+        maxEpochs=500,  # The maximum number of epoch to run
+        lrate=0.05,  # Learning rate
+        savep=True,
+        vocabLen=5000,  # Vocabulary size
+        batchSz=16,  # The batch size during training.
+    ):
 
-        print("%d train examples" % len(train_setx))
-        print("%d valid examples" % len(valid_sety))
-        print("%d test examples" % len(self.tweetData))
+        #Split the data between training set and validation set
 
-        history_errs = []
-        best_p = None
-        bad_count = 0
+        train_setx,train_sety,valid_setx,valid_sety=splitData(validSubset)
 
-        if validFreq == -1:
-            validFreq = len(train_setx) // batch_size
-        if saveFreq == -1:
-            saveFreq = len(train_setx) // batch_size
+        trainBatch = self.getMiniBatches(len(train_setx), batchSz, shuffle=True)
 
-        uidx = 0  # the number of update done
-        stop = False  # early stop
+        for _,idxList in trainBatch:
+            x, mask =self.prepareData([train_setx[t] for t in idxList])
 
-        for eidx in range(max_epochs):
-            n_samples = 0
+        yDim=max(train_sety)+1 #How many categories there are, 5 in our case (0-4), but technically only 3 (0,2,4)
 
-            # Get new shuffled index for the training set.
-            kf = getMiniBatches(len(train_setx),batch_size,shuffle=True)
+        initialize(vocabLen, embDim, yDim)
 
-            for _, train_index in kf:
-                uidx += 1
+        sharedParams = getSharedParams()
 
-                # Select the random examples for this minibatch
+        x, mask, y, predictF, loss=self.createNetwork(sharedParams, embDim)
+
+        sgd=self.getSGD(x, mask, y, loss, sharedParams)
+
+        validBatches = self.getMiniBatches(len(valid_setx), batchSz*4, shuffle=True)
+        testBatches = self.getMiniBatches(len(self.tweetData), batchSz*4, shuffle=True)
+
+        print(str(len(train_setx))+" train examples")
+        print(str(len(valid_sety))+" valid examples")
+        print(str(len(self.tweetData))+"test examples")
+
+        lastErrors = []
+        optimalParams = None
+        decreaseCnt = 0
+
+        validFreq = len(train_setx) // batchSz
+        saveFreq = len(train_setx) // batchSz
+        displayFreq=10
+
+        num_updates = 0
+        stop = False
+
+        for i in range(maxEpochs):
+
+            trainBatch = getMiniBatches(len(train_setx),batchSz,shuffle=True)
+
+            for _, train_index in trainBatch:
+                num_updates += 1
+
+                # Get the samples for this minibatch
                 y = [train_sety[t] for t in train_index]
                 x = [train_setx[t] for t in train_index]
 
-                # Get the data in np.ndarray format
-                # This swap the axis!
-                # Return something of shape (minibatch maxlen, n samples)
                 y=np.array(y).astype('int64')
                 x, mask = self.prepareData(x)
-                n_samples += x.shape[1]
 
                 cur_loss = sgd(x, mask, y)
 
-                if np.isnan(cur_loss) or np.isinf(cur_loss):
-                    print('bad loss detected: ', cur_loss)
-                    return 1., 1., 1.
+                if num_updates%displayFreq == 0:
+                    print('Epoch ', i, 'Update ', num_updates, 'loss ', cur_loss)
 
-                if np.mod(uidx, dispFreq) == 0:
-                    print('Epoch ', eidx, 'Update ', uidx, 'loss ', cur_loss)
+                if savep and num_updates%saveFreq == 0:
 
-                if saveto and np.mod(uidx, saveFreq) == 0:
+                    self.params=optimalParams if optimalParams is not None else self.unshare(sharedParams)
 
-                    params=best_p if best_p is not None else self.unshare(sharedParams)
+                    np.savez(self.saveParams,**self.params)
 
-                    np.savez(saveto, history_errs=history_errs, **params)
+                if num_updates%validFreq == 0:
 
-                if np.mod(uidx, validFreq) == 0:
-                    train_err = self.getErrorRate(predictF, train_setx, train_sety, kf)
-                    valid_err = self.getErrorRate(predictF, valid_setx, valid_sety, kf_valid)
+                    train_err,valid_err,test_err=self.getAllErrors(predictF,trainBatch,validBatches,testBatches)
 
-                    test_err = self.getErrorRate(predictF, self.tweetData, self.targetss, kf_test)
+                    lastErrors.append([valid_err, test_err])
 
-                    print(sharedParams['b'].get_value())
+                    if (optimalParams is None or
+                        valid_err <= np.array(lastErrors)[:, 0].min()):
 
-                    history_errs.append([valid_err, test_err])
+                        optimalParams = self.unshare(sharedParams)
+                        decreaseCnter = 0
 
-                    if (best_p is None or
-                        valid_err <= np.array(history_errs)[:, 0].min()):
-
-                        best_p = self.unshare(sharedParams)
-                        bad_counter = 0
-
-                    print('Train ', train_err, 'Valid ', valid_err,
-                           'Test ', test_err)
-
-                    if (len(history_errs) > patience and
-                        valid_err >= np.array(history_errs)[:-patience,
+                    if (len(lastErrors) > stopRule and
+                        valid_err >= np.array(lastErrors)[:-stopRule,
                                                                0].min()):
-                        bad_counter += 1
-                        if bad_counter > patience:
-                            print('stop...')
+                        decreaseCnter += 1
+                        if decreaseCnter > stopRule:
                             stop = True
                             break
 
             if stop:
                 break
 
-
-        if best_p is not None:
-            best_p = self.reassign(best_p,sharedParams)
+        if optimalParams is not None:
+            optimalParams = self.reassign(optimalParams,sharedParams)
         else:
-            best_p=self.unshare(sharedParams)
+            optimalParams=self.unshare(sharedParams)
 
-        kf_train_sorted = self.getMiniBatches(len(train_setx), batch_size)
-        train_err = self.getErrorRate(predictF, train_setx, train_sety, kf_train_sorted)
-        valid_err = self.getErrorRate(predictF, valid_setx, valid_sety, kf_valid)
-        test_err = self.getErrorRate(predictF, self.tweetData, self.targetss, kf_test)
-
-        print( 'Train ', train_err, 'Valid ', valid_err, 'Test ', test_err )
-
-        if saveParams:
-            np.savez(self.saveParams, train_err=train_err, valid_err=valid_err, test_err=test_err, history_errs=history_errs, **best_p)
-
-        return train_err, valid_err, test_err
+        if savep:
+            np.savez(self.saveParams,**optimalParams)
 
 
     def analyze(self,text):
-        (targets, data)=self.readCSV('../Resources/Sentiment140/trainingdata2.csv',500)
+        (targets, data)=self.readCSV(500)
         targets=list(map(lambda x: x//2,targets))
         tokens=self.tokenizeSentence(data)
         freq=self.wordFrequency(tokens)
         indexWordList = self.indexWords(freq)
         indexTweets = self.replaceWordWithIndex(tokens, indexWordList)
 
-        #trainNetwork(indexTweets,targets)
-        pred_f=self.loadPredict_f(5000,128,3)
+        pred_f=self.getPredictFun()
         t = self.processString(text)
         example_format=self.tokenizeSentence([t])
         test = self.replaceWordWithIndex(example_format,indexWordList)
 
-        return self.testExample(pred_f, test[0])
+        return self.testExample(pred_f, test[0])*2
