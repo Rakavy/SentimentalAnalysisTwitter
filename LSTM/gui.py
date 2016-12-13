@@ -35,7 +35,8 @@ def searchTweet(*args):
     word.replace("#", "%23")
 
     neuralNet=LSTMNetwork()
-    
+
+
 
     listTweets = twitterApi(word)
     lblTweets.delete('1.0', END)
@@ -43,7 +44,7 @@ def searchTweet(*args):
     for x in listTweets:
         x = ''.join(c for c in x if c <= '\uFFFF')
         y = x.encode('latin-1')
-        z = analyze(y)
+        z = neuralNet.analyze(y)
         if (z == 0):
             lblTweets.insert(END, x + '\n', 'neg')
             neg += 1
